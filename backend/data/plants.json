@@ -1,0 +1,165 @@
+{
+  "plants": [
+    {
+      "plant_id": "plant_01",
+      "common_name": "Indian Laburnum",
+      "scientific_name": "Cassia fistula",
+      "family": "Fabaceae",
+      "native_region": "Indian subcontinent and Southeast Asia",
+      "ecological_importance": "Its long-lasting yellow flowers are an important nectar source for bees and butterflies, and its seed pods provide food for birds and mammals. It is the state flower of Kerala and commonly used as a shade and avenue tree on Indian campuses.",
+      "conservation_status": "Least Concern (IUCN)",
+      "threats": [
+        "Habitat loss from urban expansion",
+        "Over-harvesting of bark and pods for traditional medicine in some regions"
+      ],
+      "conservation_actions": [
+        "Plant as a native avenue/shade tree instead of exotic ornamentals",
+        "Avoid unnecessary bark stripping when harvesting for medicinal use",
+        "Protect existing mature specimens on campus and roadside plantings"
+      ],
+      "description": "A medium-sized deciduous tree known for its cascading clusters of bright yellow flowers that bloom in early summer, giving it the common name 'Golden Shower Tree'.",
+      "image": "/plant-images/plant_01.jpg"
+    },
+    {
+      "plant_id": "plant_02",
+      "common_name": "Neem",
+      "scientific_name": "Azadirachta indica",
+      "family": "Meliaceae",
+      "native_region": "Indian subcontinent",
+      "ecological_importance": "Provides year-round shade and dense canopy that supports birds and insects, and its flowers are a nectar source for pollinators. Widely valued in traditional medicine and organic pest control, reducing reliance on synthetic pesticides.",
+      "conservation_status": "Least Concern (IUCN)",
+      "threats": [
+        "Being displaced by fast-growing exotic ornamental species in urban landscaping",
+        "Soil compaction and root damage from construction near mature trees"
+      ],
+      "conservation_actions": [
+        "Prioritize neem over exotic species in campus and urban afforestation drives",
+        "Protect root zones of mature trees during construction",
+        "Encourage use of neem-based biopesticides over chemical alternatives"
+      ],
+      "description": "A fast-growing evergreen tree with bitter-tasting leaves and small white flowers, one of the most widely used medicinal and pesticidal plants in South Asia.",
+      "image": "/plant-images/plant_02.jpg"
+    },
+    {
+      "plant_id": "plant_03",
+      "common_name": "Peepal (Sacred Fig)",
+      "scientific_name": "Ficus religiosa",
+      "family": "Moraceae",
+      "native_region": "Indian subcontinent and Southeast Asia",
+      "ecological_importance": "A keystone species in many Indian ecosystems: its figs provide food for numerous bird and bat species almost year-round, and it releases oxygen at a high rate, contributing significantly to local air quality.",
+      "conservation_status": "Least Concern (IUCN)",
+      "threats": [
+        "Urban development removing large old-growth specimens",
+        "Restricted root growth from pavement and concrete around campus/urban plantings"
+      ],
+      "conservation_actions": [
+        "Preserve mature peepal trees during campus and city planning",
+        "Leave adequate unpaved soil area around the base for root growth",
+        "Plant saplings in open ground rather than confined urban planters"
+      ],
+      "description": "A large, long-living fig tree with distinctive heart-shaped leaves that taper to a long drip tip, considered sacred in several Indian religious traditions.",
+      "image": "/plant-images/plant_03.jpg"
+    },
+    {
+      "plant_id": "plant_04",
+      "common_name": "Banyan",
+      "scientific_name": "Ficus benghalensis",
+      "family": "Moraceae",
+      "native_region": "Indian subcontinent",
+      "ecological_importance": "One of the most ecologically significant trees in India; its extensive canopy and aerial prop roots create microhabitats for birds, insects, and epiphytes, and its figs are a critical food source for many species. It is the National Tree of India.",
+      "conservation_status": "Least Concern (IUCN)",
+      "threats": [
+        "Loss of open space needed for its wide-spreading canopy and prop roots",
+        "Removal of old-growth individuals during urban and campus construction"
+      ],
+      "conservation_actions": [
+        "Designate mature banyan trees as protected campus/heritage trees",
+        "Allow sufficient open ground for aerial root establishment",
+        "Include banyan in native-species afforestation and campus greening plans"
+      ],
+      "description": "A massive, long-lived fig tree that spreads outward via aerial prop roots which thicken into secondary trunks, allowing a single tree to cover a very large area over centuries.",
+      "image": "/plant-images/plant_04.jpg"
+    },
+    {
+      "plant_id": "plant_05",
+      "common_name": "Ashoka Tree",
+      "scientific_name": "Saraca asoca",
+      "family": "Fabaceae",
+      "native_region": "Indian subcontinent",
+      "ecological_importance": "Provides nectar-rich orange-red flower clusters that support pollinating insects, and its dense evergreen canopy offers year-round shelter for birds. It holds strong cultural and religious significance in South Asia.",
+      "conservation_status": "Vulnerable (IUCN)",
+      "threats": [
+        "Overharvesting of bark for traditional/Ayurvedic medicine, which can kill the tree",
+        "Habitat loss and deforestation reducing wild populations",
+        "Slow natural regeneration in the wild"
+      ],
+      "conservation_actions": [
+        "Source Ashoka bark/products only from certified sustainable cultivation, not wild-harvested trees",
+        "Support nursery propagation and campus/community planting programs",
+        "Protect and monitor existing wild and planted populations"
+      ],
+      "description": "A small evergreen tree with fragrant orange-to-red flower clusters, historically and culturally revered across the Indian subcontinent, now considered vulnerable in the wild.",
+      "image": "/plant-images/plant_05.jpg"
+    },
+    {
+      "plant_id": "plant_06",
+      "common_name": "Mango",
+      "scientific_name": "Mangifera indica",
+      "family": "Anacardiaceae",
+      "native_region": "Indian subcontinent and Myanmar",
+      "ecological_importance": "Its flowers support a wide range of pollinating insects, and its fruit is an important food source for birds, bats, and mammals. Mango trees also provide dense, long-lasting shade and are a dominant part of many Indian campus and orchard landscapes.",
+      "conservation_status": "Least Concern (IUCN)",
+      "threats": [
+        "Monoculture orchard practices reducing genetic diversity of wild/local varieties",
+        "Loss of older heritage trees to land-use change"
+      ],
+      "conservation_actions": [
+        "Preserve local and heritage mango cultivars alongside commercial varieties",
+        "Retain mature mango trees in campus green spaces",
+        "Support pollinator-friendly practices (avoid excess pesticide use during flowering)"
+      ],
+      "description": "A large evergreen tree, the source of the mango fruit and the national fruit of India, widely cultivated across South Asia for millennia.",
+      "image": "/plant-images/plant_06.jpg"
+    },
+    {
+      "plant_id": "plant_07",
+      "common_name": "Indian Bael",
+      "scientific_name": "Aegle marmelos",
+      "family": "Rutaceae",
+      "native_region": "Indian subcontinent",
+      "ecological_importance": "Its aromatic flowers attract pollinators and its fruit is eaten and dispersed by wildlife. The tree is also considered sacred and is frequently planted near temples and campuses, helping maintain green cover in urban areas.",
+      "conservation_status": "Near Threatened in wild populations (though common in cultivation)",
+      "threats": [
+        "Habitat fragmentation reducing wild/naturalized populations",
+        "Declining regeneration outside cultivated and temple/campus plantings"
+      ],
+      "conservation_actions": [
+        "Encourage planting in campus and community green spaces",
+        "Protect naturally occurring wild individuals where found",
+        "Use seeds from local trees for afforestation rather than only relying on cultivated stock"
+      ],
+      "description": "A slow-growing, spiny deciduous tree bearing hard-shelled aromatic fruit, long used in traditional medicine and considered sacred in Hindu tradition.",
+      "image": "/plant-images/plant_07.jpg"
+    },
+    {
+      "plant_id": "plant_08",
+      "common_name": "Curry Leaf Tree",
+      "scientific_name": "Murraya koenigii",
+      "family": "Rutaceae",
+      "native_region": "Indian subcontinent",
+      "ecological_importance": "Its small white flowers attract bees and other pollinators, and its berries are eaten by birds. As a common understorey shrub/small tree, it contributes to layered vegetation structure in campus and garden landscapes.",
+      "conservation_status": "Least Concern (IUCN)",
+      "threats": [
+        "Overharvesting of leaves in cultivated settings can stress individual plants",
+        "Loss of understorey habitat due to urban landscaping that favors lawns over shrub layers"
+      ],
+      "conservation_actions": [
+        "Maintain shrub-layer plantings on campus rather than clearing to bare lawn",
+        "Practice moderate, sustainable leaf harvesting",
+        "Include in native-species landscaping and pollinator gardens"
+      ],
+      "description": "A small aromatic tree/shrub whose leaves are a staple flavoring herb across South Asian cuisine, and whose small berries provide food for local bird species.",
+      "image": "/plant-images/plant_08.jpg"
+    }
+  ]
+}
