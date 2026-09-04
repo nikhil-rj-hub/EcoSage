@@ -3,3 +3,11 @@ uvicorn[standard]==0.30.6
 pydantic==2.9.2
 python-multipart==0.0.9
 anthropic==0.34.2
+
+# Plant identification (Member 2 / ml/). CPU-only wheels via --extra-index-url
+# to avoid pulling CUDA builds (much larger, unneeded for inference-only use).
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.14.0
+torchvision==0.29.0
+scikit-learn==1.7.2
+joblib==1.5.2
