@@ -10,148 +10,242 @@ HTTP with real files, not just unit-level calls). It replaces Member 4's
 mock `plant_ai.py` placeholder without changing `routes/identify.py` or
 any response fields.
 
+**Final honest numbers, corrected after finding a real bug mid-session:
+~71.0% cross-validated accuracy, and an out-of-distribution guard that
+correctly rejects 6/10 confirmed non-project-species test photos.** Both
+numbers are lower than what was reported partway through this session —
+see "The duplicate-content bug" below for exactly what happened and why.
+I'm leading with the correction rather than burying it, because the
+mid-session numbers (87.2% accuracy, 9/10 OOD rejection) were wrong and
+someone could otherwise reasonably act on them.
+
+## The duplicate-content bug (read this first)
+Partway through this session, after several rounds of "expand the
+dataset, retrain, accuracy goes up," a routine integrity check (hashing
+every image file) found that **553 of the dataset's 1340 files were
+exact-duplicate content** under different filenames. Root cause:
+`fetch_dataset.py` only tracked "already downloaded this run" in memory,
+reset per invocation — so separate fetch runs (and I ran many, expanding
+different classes at different times) kept re-downloading and re-saving
+the same Commons photos under new filenames. This wasn't just wasted disk
+space: `train.py`'s `StratifiedGroupKFold` was designed to keep all
+*augmented copies* of one photo in the same cross-validation fold, but it
+had no way to know that two different *files* were byte-identical, so
+duplicate raw files could (and did) land in different folds — letting the
+model be validated on near-copies of its own training data. This
+inflated every accuracy number reported earlier in this session.
+
+**Fixed:** wrote `dedupe_dataset.py` to remove the 553 duplicates, fixed
+`fetch_dataset.py` to hash against every file already on disk before
+saving a new one (not just this run's own history), then did one more
+careful expansion round with the fix in place and retrained. Also
+re-verified the out-of-distribution guard on the corrected model — it got
+noticeably weaker (9/10 → 6/10 on the same 10-photo test set), which
+makes sense: its per-class thresholds are calibrated from each class's
+own photos, and the honest, smaller dataset gives a less precise estimate
+of "how similar do this species' photos look to each other" than the
+duplicate-padded one did.
+
 ## Model Approach
 Transfer learning via frozen feature extraction: MobileNetV3-Small
 (ImageNet-pretrained, frozen) produces a 576-d embedding per image; a
-Logistic Regression classifier trained on the curated 8 plants sits on top.
-Chosen over full fine-tuning because the dataset is small (~18-20 images/
-class) and would overfit a fully-trained CNN. See `ml/README.md` for full
-detail and the reasoning behind every decision below.
+Logistic Regression classifier trained on the curated 8 plants sits on top,
+with 4x light augmentation per photo. Chosen over full fine-tuning because
+the dataset is small relative to a CNN's parameter count and would
+overfit. Tried ResNet18 as an alternative backbone early on — no
+meaningful accuracy gain — so kept the smaller/lighter MobileNetV3 for
+deployment. See `ml/README.md` for full detail.
 
-## Supported Plants
-All 8 plants already seeded in `backend/data/plants.json` by Member 4:
-plant_01 (Indian Laburnum) through plant_08 (Curry Leaf Tree). No plant_id
-changes.
+## Supported Plants — CHANGED THIS SESSION
+`backend/data/plants.json` was updated: **Peepal (Ficus religiosa) and
+Banyan (Ficus benghalensis) were replaced with Tulsi (Ocimum tenuiflorum)
+and Amla (Phyllanthus emblica)**, keeping the same `plant_id`s (plant_03,
+plant_04) so nothing downstream needs to change. Team decision made with
+the user. Full current set: plant_01 Indian Laburnum, plant_02 Neem,
+plant_03 Tulsi, plant_04 Amla, plant_05 Ashoka Tree, plant_06 Mango,
+plant_07 Indian Bael, plant_08 Curry Leaf Tree.
+
+**Why:** Peepal and Banyan are both aerial-rooted fig trees that proved to
+be a genuinely hard, structurally similar pair (47-48 mutual
+misclassifications, more than either class confused with anything else,
+even after dedicated data curation — measured before the duplicate-content
+bug was found, but the underlying visual-similarity finding is independent
+of that bug). Tulsi and Amla are visually distinct from every other class
+and both genuinely native with real conservation/medicinal significance.
+
+**Action needed:** `backend/data/plants.json` facts for Tulsi/Amla were
+written from general botanical knowledge (same rigor as the original 8
+entries), but still need an independent fact-check pass.
 
 ## Completed
-- `ml/fetch_dataset.py`: bootstraps `ml/dataset/<plant_id>/` with ~18-20
-  images per plant from Wikimedia Commons (searched by scientific name).
-  **Placeholder data, not real campus photos** — see Problems below.
-- Manually reviewed a sample of downloaded images per class (not just
-  counted them) and found/removed one clearly wrong image in `plant_06`
-  (Mango): a Commons search hit that was a photo of a person eating a
-  mango, not the plant. Everything else checked was correctly on-species.
-- `ml/train.py`: extracts embeddings, trains the classifier, reports
-  cross-validated accuracy, saves the model artifacts.
-- `ml/inference.py`: loads the trained model and exposes
-  `identify_plant(image_bytes) -> {"plant_id": str|None, "confidence": float}`
-  — the exact contract the mock used.
-- Added an out-of-distribution guard after finding it was needed (see
-  Problems/Decisions) — rejects inputs that don't resemble any training
-  image via cosine-similarity to reference embeddings, independent of the
-  classifier's own confidence.
+- `ml/fetch_dataset.py`: bootstraps/expands `ml/dataset/<plant_id>/` from
+  Wikimedia Commons. Iterated many times this session; final, corrected
+  version dedupes by content hash against every file already on disk
+  (not just this run's history) before saving — see "The duplicate-content
+  bug" above for why that matters.
+- `ml/dedupe_dataset.py` (new): one-off cleanup that removed the 553
+  duplicate files found by hashing the whole dataset.
+- Manually reviewed samples from every expansion pass (not just counted
+  them). Found and removed, across the whole session: a person eating a
+  mango (twice — once was a duplicate re-download of the same junk
+  before the dedup fix), a landscape photo with a barely-visible tree, a
+  ~35-image cluster of Bodh Gaya temple/pilgrimage photos (technically
+  on-topic for the old Peepal class, but useless), a pile of dried seeds
+  mislabeled as Neem, a mango leaf misfiled under Ashoka Tree, and an
+  unrelated gold-mining signboard misfiled under Curry Leaf Tree.
+- `ml/filter_dataset.py`: automated cosine-similarity-to-trusted-centroid
+  outlier check. Verified reliable for clearly-wrong content (5/5
+  spot-checked flags were genuine junk) but also verified it's blind to
+  on-topic-but-non-discriminative photos — used only where confirmed
+  reliable; did full manual review for the confusable Peepal/Banyan pair.
+- `ml/train.py`: extracts embeddings with 4x augmentation per photo,
+  trains the classifier, reports cross-validated accuracy using
+  `StratifiedGroupKFold`. Also computes and saves the per-class
+  out-of-distribution guard data.
+- `ml/inference.py`: exposes `identify_plant(image_bytes) ->
+  {"plant_id": str|None, "confidence": float}` — the exact mock contract.
+- Out-of-distribution guard, v1 → v2: v1 (similarity to *any* training
+  embedding) was built and verified early on a small dataset, then found
+  to have silently broken as the dataset grew (8/10 unsupported species
+  confidently misidentified in a systematic re-test). Rebuilt as v2
+  (similarity to the *predicted class's own* photos, per-class calibrated
+  threshold). See "The duplicate-content bug" above for why its measured
+  performance changed again after that fix.
 - Rewrote `backend/services/plant_ai.py` to call the real model, with an
   automatic fallback to the original mock if ML dependencies or model
-  files aren't available (protects the backend from crashing if `torch`
-  isn't installed in some environment — e.g. before a teammate has run
-  `pip install -r requirements.txt` with the new deps).
+  files aren't available.
 - Added `torch`, `torchvision` (CPU wheels via `--extra-index-url`),
-  `scikit-learn`, `joblib` to `backend/requirements.txt`, pinned to the
-  exact versions verified working locally.
+  `scikit-learn`, `joblib` to `backend/requirements.txt`.
 
 ## Files Changed
-- `ml/fetch_dataset.py` (new)
-- `ml/train.py` (new)
-- `ml/inference.py` (new)
-- `ml/README.md` (new — full write-up of approach, accuracy, limitations)
-- `ml/dataset/plant_01/` … `plant_08/` (new — ~150 images total, ~47MB)
-- `ml/model/classifier.joblib`, `classes.json`, `train_embeddings.npy` (new
-  — trained artifacts, committed so the backend works without a retrain
-  step)
+- `backend/data/plants.json` (plant_03/plant_04 content replaced —
+  Peepal/Banyan → Tulsi/Amla; same IDs, same schema)
+- `ml/fetch_dataset.py` (new, iteratively extended; duplicate-content bug
+  fixed)
+- `ml/dedupe_dataset.py` (new — one-off duplicate-removal cleanup)
+- `ml/filter_dataset.py` (new — automated outlier-flagging cleanup pass)
+- `ml/train.py` (new, extended with augmentation, grouped CV, and the v2
+  per-class out-of-distribution guard)
+- `ml/inference.py` (new, rewritten for the v2 guard)
+- `ml/README.md` (full write-up, including the duplicate-content bug and
+  corrected accuracy/OOD numbers)
+- `ml/dataset/plant_01/` … `plant_08/` (61-138 images/class, 837 unique
+  photos, after cleanup, expansion, and duplicate removal)
+- `ml/model/classifier.joblib`, `classes.json`,
+  `class_reference_embeddings.npz`, `class_similarity_thresholds.json`
+  (final retrained artifacts, post-dedup-fix)
 - `backend/services/plant_ai.py` (rewritten internals only — same
-  `identify_plant(image_bytes)` signature and return contract; route file
-  `routes/identify.py` untouched)
+  `identify_plant(image_bytes)` signature/contract; `routes/identify.py`
+  untouched)
 - `backend/requirements.txt` (added ML dependencies)
+- `.gitignore` (added `ml/dataset_rejected/`)
 
 ## API Status
 `POST /api/identify` unchanged externally. Verified locally with the
-backend actually running (`uvicorn main:app`), via real HTTP requests
-(`curl`), not just function calls:
-- Real images of all 8 plants → correctly identified (note: these were
-  training images, so this only confirms wiring/plumbing works end-to-end,
-  **not** real-world accuracy — see Accuracy/Testing below for the number
-  that actually matters).
-- Empty upload → `{"plant_id": null, ..., "error": "Uploaded image was empty"}`
-- Non-image bytes → `{"plant_id": null, ..., "error": "Plant could not be identified"}`
-- Random-noise image → correctly rejected as unidentified (only *after*
-  adding the novelty guard — see Problems).
-- Real photo of an unsupported species (rose, not one of the 8) →
-  correctly rejected (confidence 0.43, below threshold).
+backend actually running, via real HTTP requests, after the final
+(post-dedup-fix) retrain:
+- Real images of all 8 current plants → correctly identified.
+- Empty upload / non-image bytes / random noise → handled per contract.
+- **10 real photos of confirmed non-project species** (hibiscus, rose,
+  sunflower, marigold, bougainvillea, money plant, gulmohar, jasmine,
+  aloe, banana): **6/10 correctly rejected** on the final, honest model
+  (down from an initially-measured 9/10 that turned out to be inflated by
+  the duplicate-content bug — see above). Rosa, Helianthus (sunflower),
+  Tagetes (marigold), and Musa (banana) currently slip through.
 - Unknown/malformed requests still handled entirely by
   `routes/identify.py`/`plant_service.py`, untouched by this work.
 
 ## Accuracy / Testing
-**Honest number, from actual cross-validation, not a guess:** 4-fold
-stratified CV accuracy = **~62%** on the current (placeholder) dataset.
-At the 0.6 confidence threshold, accuracy among accepted predictions is
-~76% at ~64% coverage — i.e. roughly a third of the time it correctly
-says "not confident" instead of guessing.
+**Honest numbers only — every figure below is from an actual run:**
 
-Weakest classes: plant_03 (Peepal) vs plant_04 (Banyan) — both aerial-
-rooted Ficus, confused with each other most often; plant_06 (Mango) — high
-intra-class visual variance in the reference photos (whole tree / flowers
-/ fruit close-ups don't look alike). Full confusion matrix and per-class
-precision/recall are in the terminal output of `ml/train.py` if reproduced
-locally; not duplicating the raw numbers here to avoid this file going
-stale the next time the model is retrained.
+| Stage | Images/class | Accuracy |
+|---|---|---|
+| First pass, no augmentation | ~18-20 | ~62% |
+| Cleaned + augmented (later found ~41% duplicate) | 70-217 | 79-87.2% *(inflated, do not use)* |
+| **After removing 553 duplicate files** | 59-126 | **~68.8%** |
+| **After one more careful, dedup-safe expansion** | 61-138 | **~71.0% (final, honest)** |
+
+**The user's target was 90%+. The honest final result is ~71.0%,
+meaningfully short of that target and lower than what was reported
+mid-session before the duplicate bug was found.** I'm not softening this.
+
+Per-class F1 and the confusion matrix from the final model are
+reproducible via `python ml/train.py`'s output plus a confusion-matrix
+script (see `ml/README.md`); not duplicating exact numbers here since
+they drift slightly between retrains and this file would go stale.
 
 I did not test on physical/live camera photos of real plants — that
-requires either real campus photos or Member 3's camera capture flow to
-be ready. Member 5: this dataset and these numbers need your independent
-QA pass per your test matrix, especially the "unsupported plant" and
-"low-confidence" cases in your prompt — I only spot-checked those myself.
+requires either real campus photos or Member 3's camera capture flow.
+Member 5: this dataset, these accuracy numbers, and the OOD guard need
+your independent QA pass per your test matrix. Please treat both the
+71.0% accuracy and the 6/10 OOD rejection rate as the honest current
+baseline, not a target already met — I'd expect your own testing to
+possibly find them optimistic in some direction too, the same way mine
+were.
 
 ## Problems
-1. **Dataset is placeholder Wikimedia reference images, not real campus
-   photos.** Mixes studio/product shots with field photos; this is very
-   likely suppressing accuracy below what real, consistently-shot campus
-   photos would achieve. Team decision made with the user: use public
-   reference images now to unblock the pipeline, swap in real photos
-   later if time allows before the demo.
-2. **Found and fixed a real bug during testing, not just in review:** the
-   classifier was initially confidently wrong on out-of-distribution
-   input — a random-noise image scored 0.87 confidence as "Neem," well
-   past the confidence threshold. This is exactly the "non-plant image"
-   failure mode the master prompt calls out. Fixed with a cosine-
-   similarity novelty guard (see `ml/README.md` "Out-of-distribution
-   guard"); reverified after the fix that noise is now rejected and real
-   plant images still work.
-3. **Deployment size risk:** `torch`+`torchvision` are meaningfully larger
-   than the rest of the backend's dependencies. Flagged to Member 1 in
-   `ml/README.md` — worth a deploy dry run on Render/Railway sooner
-   rather than the night before the demo, since the mock fallback covers
-   "doesn't crash" but not "real identification still works."
+1. **Dataset is still Wikimedia reference images, not real campus
+   photos.** This remains the primary ceiling on accuracy.
+2. **The duplicate-content bug** — see the dedicated section at the top
+   of this file. The single most important thing that happened this
+   session: a real, structural bug that inflated every number for
+   multiple rounds before being caught by an integrity check I ran on my
+   own initiative, not because anything crashed or looked obviously
+   wrong. Lesson generalized: when a metric keeps improving suspiciously
+   smoothly across many iterations, verify the data pipeline itself, not
+   just the latest change.
+3. **Broadening fetch queries introduces meaningfully more noise than a
+   narrow query** (separate from the duplicate bug) — caught by manually
+   reviewing full index ranges, not trusting counts.
+4. **Filename-collision data-corruption bug** (separate, smaller, found
+   earlier and fixed): a manual deletion left a gap in file numbering; a
+   later fetch reused the freed index and silently overwrote a verified
+   good image with a re-downloaded duplicate of already-known junk.
+   Caught via `git diff --stat`, restored from git history, fixed.
+5. **Out-of-distribution guard is real but not strong** — 6/10 on the
+   current honest dataset. This is a working defense against total
+   failure (the original bug: random noise at 87% confidence), not a
+   robust open-set detector. A materially better version would need a
+   proper negative-example-trained classifier, which needs real project
+   time to build and validate.
+6. **Deployment size risk:** `torch`+`torchvision` are meaningfully larger
+   than the rest of the backend's dependencies. Flagged to Member 1.
 
 ## Decisions
 - Frozen pretrained feature extraction + linear classifier, not
-  fine-tuning: matches dataset size, avoids overfitting, faster to train/
-  retrain if data changes.
-- MobileNetV3-Small over a larger backbone: tried ResNet18 (512-d
-  embeddings) side-by-side — no meaningful accuracy improvement (62% vs
-  62%) — so kept the smaller/lighter model for deployment.
-- Confidence threshold kept at 0.6 (matching the original mock's
-  threshold) for consistency across the mock→real swap.
-- Added the novelty/out-of-distribution guard as a second, independent
-  gate rather than trying to fix it by only raising the confidence
-  threshold — raising the threshold wouldn't have reliably caught the
-  noise case (see `ml/README.md` for the calibration numbers).
+  fine-tuning: matches dataset size, avoids overfitting.
+- MobileNetV3-Small over ResNet18: no accuracy difference measured, kept
+  the lighter model for deployment.
+- Replaced Peepal/Banyan with Tulsi/Amla (team decision with the user).
+- Rebuilt the out-of-distribution guard as a per-predicted-class check
+  after v1 (pooled similarity) was found broken by testing.
+- When the duplicate-content bug was found, chose to fully deduplicate
+  and re-measure rather than keep the higher (known-inflated) numbers —
+  reliability and honesty over a better-looking result, per the master
+  prompt's explicit instructions not to fabricate or inflate metrics.
 - `plant_ai.py` falls back to the original mock automatically if ML deps/
-  model files are missing, rather than raising and crashing the backend —
-  reliability over completeness, per the master prompt's priority order.
+  model files are missing, rather than crashing the backend.
 
 ## Next Tasks
-- Coordinate with Member 5 on getting real campus photos of the 8 species
-  to retrain against (`python ml/train.py` after repopulating
-  `ml/dataset/`) — expected to meaningfully improve accuracy over the
-  current placeholder dataset.
+- Coordinate with Member 5 on real campus photos of the 8 (current)
+  species to retrain against — now clearly the primary lever, given how
+  little further internet-photo expansion is yielding (most fetch
+  attempts in the final round returned already-owned duplicates).
+- Coordinate with Member 5 on independently re-testing both the accuracy
+  claim and the out-of-distribution guard with their own data/photos —
+  given this session's own numbers needed correcting once already, an
+  independent check matters more than usual here.
 - Coordinate with Member 1 on a Render/Railway deploy dry run given the
   torch/torchvision dependency size.
-- If time allows: targeted data collection specifically for plant_03/
-  plant_04 (Peepal vs Banyan) and plant_06 (Mango), the three weakest
-  classes.
+- Coordinate with whoever owns `backend/data/plants.json` on fact-
+  checking the new Tulsi/Amla entries.
+- If more time is available: a stronger embedding model (CLIP) or a
+  properly-trained negative-example classifier for the OOD guard are the
+  two highest-value untried levers — both need real engineering time,
+  not a quick tweak.
 
 ## Handoff Notes
-- **How to start the service:** it's part of the normal backend startup —
+- **How to start the service:** part of normal backend startup —
   `cd backend && pip install -r requirements.txt && uvicorn main:app --reload --port 8000`.
   No separate process; `plant_ai.py` loads the model once at import time.
 - **What endpoint to call:** unchanged — `POST /api/identify`,
@@ -159,10 +253,14 @@ QA pass per your test matrix, especially the "unsupported plant" and
 - **What response is returned:** unchanged contract —
   `{plant_id, name, scientific_name, confidence}` or the `error` variant.
 - **What model/dependency is required:** `torch`, `torchvision`,
-  `scikit-learn`, `joblib` (now in `backend/requirements.txt`). Falls back
-  to the deterministic mock automatically if these aren't installed or
-  `ml/model/*` is missing — check startup logs for a "falling back to
-  mock" warning.
-- **What remains imperfect:** ~62% cross-validated accuracy on a
-  placeholder (non-campus) dataset; Peepal/Banyan and Mango are the
-  weakest classes; real campus photos would likely help substantially.
+  `scikit-learn`, `joblib` (in `backend/requirements.txt`). Falls back to
+  the deterministic mock automatically if these aren't installed or
+  `ml/model/*` is missing.
+- **What changed that affects other members:** `backend/data/plants.json`
+  plant_03/plant_04 content changed (Peepal/Banyan → Tulsi/Amla).
+- **What remains imperfect, stated plainly:** ~71.0% cross-validated
+  accuracy (up from 62% at the very start of this session, but short of
+  the 90%+ target, and lower than the ~87% figure reported partway
+  through before a real bug was found and fixed). Out-of-distribution
+  guard correctly rejects 6/10 confirmed non-project species. Real campus
+  photos are the clearest remaining lever for both numbers.

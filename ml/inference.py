@@ -13,6 +13,7 @@ This is the same return contract as the mock it replaces
 """
 
 import io
+import json
 import pathlib
 from typing import Optional, TypedDict
 
@@ -25,19 +26,19 @@ from PIL import Image, UnidentifiedImageError
 HERE = pathlib.Path(__file__).parent
 MODEL_DIR = HERE / "model"
 CLASSIFIER_PATH = MODEL_DIR / "classifier.joblib"
-TRAIN_EMBEDDINGS_PATH = MODEL_DIR / "train_embeddings.npy"
+CLASS_REFERENCE_EMBEDDINGS_PATH = MODEL_DIR / "class_reference_embeddings.npz"
+CLASS_SIMILARITY_THRESHOLDS_PATH = MODEL_DIR / "class_similarity_thresholds.json"
 
 CONFIDENCE_THRESHOLD = 0.6
 
-# Out-of-distribution guard: reject inputs whose embedding isn't at least
-# this cosine-similar to *some* training image, even if the classifier is
-# confident. Without this, a softmax classifier can be very confident on
-# inputs unlike anything it was trained on (verified: random noise scored
-# 0.87 confidence as "Neem" before this check was added). Calibrated from
-# the training set's own leave-one-out nearest-neighbor similarities, which
-# ranged ~0.54-0.9+ in-distribution vs ~0.19 for random noise - 0.45 sits
-# safely below the in-distribution range with margin.
-NOVELTY_SIMILARITY_THRESHOLD = 0.45
+# Out-of-distribution guard, v2 - see the matching comment in train.py for
+# the full story of why this is per-class rather than one global threshold.
+# In short: a single global "similar to anything we've trained on" check
+# broke down once the dataset grew large and diverse (8/10 unsupported
+# species were confidently misidentified). This version instead requires
+# the query to be similar to photos of the SPECIFIC class the classifier
+# predicted, using a threshold calibrated per-class from that class's own
+# data (see class_similarity_thresholds.json, written by train.py).
 
 
 class IdentificationResult(TypedDict):
@@ -48,12 +49,14 @@ class IdentificationResult(TypedDict):
 _classifier = None
 _backbone = None
 _preprocess = None
-_train_embeddings = None
+_class_reference_embeddings = None
+_class_similarity_thresholds = None
 
 
 def _load() -> None:
     """Lazily load the model on first use (keeps backend import time fast)."""
-    global _classifier, _backbone, _preprocess, _train_embeddings
+    global _classifier, _backbone, _preprocess
+    global _class_reference_embeddings, _class_similarity_thresholds
     if _classifier is not None:
         return
 
@@ -61,13 +64,16 @@ def _load() -> None:
         raise FileNotFoundError(
             f"No trained classifier at {CLASSIFIER_PATH}. Run `python ml/train.py` first."
         )
-    if not TRAIN_EMBEDDINGS_PATH.exists():
+    if not CLASS_REFERENCE_EMBEDDINGS_PATH.exists() or not CLASS_SIMILARITY_THRESHOLDS_PATH.exists():
         raise FileNotFoundError(
-            f"No reference embeddings at {TRAIN_EMBEDDINGS_PATH}. Run `python ml/train.py` first."
+            f"No novelty-guard reference data in {MODEL_DIR}. Run `python ml/train.py` first."
         )
 
     _classifier = joblib.load(CLASSIFIER_PATH)
-    _train_embeddings = np.load(TRAIN_EMBEDDINGS_PATH)
+    _class_reference_embeddings = dict(np.load(CLASS_REFERENCE_EMBEDDINGS_PATH))
+    _class_similarity_thresholds = json.loads(
+        CLASS_SIMILARITY_THRESHOLDS_PATH.read_text(encoding="utf-8")
+    )
 
     weights = torchvision.models.MobileNet_V3_Small_Weights.DEFAULT
     backbone = torchvision.models.mobilenet_v3_small(weights=weights)
@@ -89,8 +95,10 @@ def identify_plant(image_bytes: bytes) -> IdentificationResult:
     """
     Classify a plant image among the curated set the model was trained on.
 
-    Returns plant_id=None, confidence=0.0 if the image can't be decoded, or
-    if the model's top prediction confidence is below CONFIDENCE_THRESHOLD.
+    Returns plant_id=None, confidence=0.0 if the image can't be decoded, if
+    the model's top prediction confidence is below CONFIDENCE_THRESHOLD, or
+    if the image doesn't resemble the predicted class closely enough to
+    trust the prediction (out-of-distribution guard).
     """
     if not image_bytes:
         return {"plant_id": None, "confidence": 0.0}
@@ -105,13 +113,6 @@ def identify_plant(image_bytes: bytes) -> IdentificationResult:
 
     features = _embed(image)
 
-    normalized = features / np.linalg.norm(features)
-    novelty_similarity = float((_train_embeddings @ normalized.T).max())
-    if novelty_similarity < NOVELTY_SIMILARITY_THRESHOLD:
-        # Doesn't resemble anything the model was trained on (e.g. a
-        # non-plant photo) - don't let the classifier guess anyway.
-        return {"plant_id": None, "confidence": 0.0}
-
     probabilities = _classifier.predict_proba(features)[0]
     best_index = int(np.argmax(probabilities))
     confidence = float(probabilities[best_index])
@@ -119,5 +120,14 @@ def identify_plant(image_bytes: bytes) -> IdentificationResult:
 
     if confidence < CONFIDENCE_THRESHOLD:
         return {"plant_id": None, "confidence": round(confidence, 2)}
+
+    normalized = (features / np.linalg.norm(features)).reshape(-1)
+    class_embeddings = _class_reference_embeddings[predicted_id]
+    similarity_to_predicted_class = float((class_embeddings @ normalized).max())
+    threshold = _class_similarity_thresholds[predicted_id]
+    if similarity_to_predicted_class < threshold:
+        # Confident, but doesn't actually look like the predicted class's
+        # own training photos - likely a species outside the curated set.
+        return {"plant_id": None, "confidence": 0.0}
 
     return {"plant_id": predicted_id, "confidence": round(confidence, 2)}

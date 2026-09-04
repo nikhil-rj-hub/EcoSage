@@ -42,42 +42,42 @@
     },
     {
       "plant_id": "plant_03",
-      "common_name": "Peepal (Sacred Fig)",
-      "scientific_name": "Ficus religiosa",
-      "family": "Moraceae",
+      "common_name": "Tulsi (Holy Basil)",
+      "scientific_name": "Ocimum tenuiflorum",
+      "family": "Lamiaceae",
       "native_region": "Indian subcontinent and Southeast Asia",
-      "ecological_importance": "A keystone species in many Indian ecosystems: its figs provide food for numerous bird and bat species almost year-round, and it releases oxygen at a high rate, contributing significantly to local air quality.",
-      "conservation_status": "Least Concern (IUCN)",
+      "ecological_importance": "Its small purple-white flower spikes are a nectar source for bees and other pollinators, and its aromatic oils have natural antimicrobial and insect-repelling properties. Widely grown in home courtyards and temples, it supports pollinator activity even in dense urban settings.",
+      "conservation_status": "Not evaluated by IUCN; secure due to widespread cultivation, not considered threatened",
       "threats": [
-        "Urban development removing large old-growth specimens",
-        "Restricted root growth from pavement and concrete around campus/urban plantings"
+        "Genetic dilution of traditional/wild strains through uncontrolled hybridization with ornamental basil varieties",
+        "Loss of home-garden and temple planting traditions in dense urban redevelopment"
       ],
       "conservation_actions": [
-        "Preserve mature peepal trees during campus and city planning",
-        "Leave adequate unpaved soil area around the base for root growth",
-        "Plant saplings in open ground rather than confined urban planters"
+        "Grow and maintain traditional Tulsi strains in campus and community gardens",
+        "Avoid uncontrolled cross-planting with ornamental Ocimum cultivars near seed-saving plants",
+        "Include Tulsi in pollinator-friendly campus landscaping"
       ],
-      "description": "A large, long-living fig tree with distinctive heart-shaped leaves that taper to a long drip tip, considered sacred in several Indian religious traditions.",
+      "description": "A small aromatic shrub with green or purple-tinged stems and leaves, held sacred in Hinduism and traditionally grown in courtyards and temples across the Indian subcontinent.",
       "image": "/plant-images/plant_03.jpg"
     },
     {
       "plant_id": "plant_04",
-      "common_name": "Banyan",
-      "scientific_name": "Ficus benghalensis",
-      "family": "Moraceae",
-      "native_region": "Indian subcontinent",
-      "ecological_importance": "One of the most ecologically significant trees in India; its extensive canopy and aerial prop roots create microhabitats for birds, insects, and epiphytes, and its figs are a critical food source for many species. It is the National Tree of India.",
+      "common_name": "Amla (Indian Gooseberry)",
+      "scientific_name": "Phyllanthus emblica",
+      "family": "Phyllanthaceae",
+      "native_region": "Indian subcontinent and Southeast Asia",
+      "ecological_importance": "Its round fruit is an important food source for birds and mammals, and its fine, feathery foliage supports insect life while contributing leaf litter that enriches soil. Widely used in traditional medicine, reducing pressure on synthetic alternatives.",
       "conservation_status": "Least Concern (IUCN)",
       "threats": [
-        "Loss of open space needed for its wide-spreading canopy and prop roots",
-        "Removal of old-growth individuals during urban and campus construction"
+        "Overharvesting of fruit and bark for the Ayurvedic and food industries",
+        "Habitat loss from deforestation of native mixed-forest stands"
       ],
       "conservation_actions": [
-        "Designate mature banyan trees as protected campus/heritage trees",
-        "Allow sufficient open ground for aerial root establishment",
-        "Include banyan in native-species afforestation and campus greening plans"
+        "Encourage sustainable, rotational fruit harvesting rather than bark stripping",
+        "Include Amla in native-species agroforestry and campus planting programs",
+        "Protect existing wild and semi-wild stands during land development"
       ],
-      "description": "A massive, long-lived fig tree that spreads outward via aerial prop roots which thicken into secondary trunks, allowing a single tree to cover a very large area over centuries.",
+      "description": "A medium-sized deciduous tree with feathery, finely pinnate leaves resembling a fern frond, bearing round, greenish-yellow astringent fruit that is exceptionally rich in vitamin C and widely used in traditional medicine.",
       "image": "/plant-images/plant_04.jpg"
     },
     {
