@@ -8,17 +8,43 @@ previously lived in `backend/services/plant_ai.py`.
 Transfer learning via frozen feature extraction (not full fine-tuning):
 
 ```
-image -> MobileNetV3-Small (ImageNet-pretrained, frozen) -> 576-d embedding
-      -> Logistic Regression classifier (trained on curated plants)
+image -> DINO ViT-Small (self-supervised, frozen) -> 384-d embedding
+      -> MLP classifier (trained on curated plants)
       -> plant_id + confidence
 ```
 
-Fine-tuning a full CNN was ruled out: the curated dataset only has
-~18-20 images per class, which would badly overfit a network with millions
-of trainable parameters. Frozen pretrained features + a simple linear
-classifier on top is the standard, much more data-efficient approach for
-this dataset size, and matches the master prompt's guidance to "start with
-the simplest viable approach."
+Fine-tuning the backbone itself was ruled out: the curated dataset is
+small enough that fine-tuning millions of parameters would badly overfit.
+Frozen pretrained features + a classifier on top is the standard, more
+data-efficient approach for this dataset size.
+
+**Why DINO, not a supervised CNN (this went through two real iterations,
+not a single guess):**
+1. Started with MobileNetV3-Small (2.5M params), and compared it
+   side-by-side against ResNet18 (11.7M params) - both are *supervised*
+   ImageNet classifiers. Result: identical accuracy (62% vs 62% at the
+   time). Conclusion: swapping between similarly-trained supervised CNNs
+   doesn't help, because they learn correlated features from the same
+   labeled-classification objective - the bottleneck wasn't model
+   capacity.
+2. Later, under pressure to close a large remaining accuracy gap, tried
+   DINO ViT-Small (21.7M params) - a *self-supervised* model trained with
+   a fundamentally different objective (no labels; learns from an image's
+   relationship to augmented views of itself). This is a genuinely
+   different signal, not just a bigger version of the same thing. Result:
+   a real, honest jump - 71.0% -> 81.8% on the exact same
+   cross-validation methodology used throughout this file. Also tried
+   concatenating DINO + MobileNetV3 features together, which made things
+   *worse* (79-80.5%) - MobileNetV3's weaker signal diluted DINO's
+   stronger one rather than adding anything complementary, confirming
+   this isn't just "more features = better."
+3. Classifier head was also compared honestly: Logistic Regression (~79%
+   on DINO features), k-NN (worse, 75-78%), and an MLP (256 hidden units,
+   alpha=0.01) at 81.8% - the MLP is what's used in production.
+
+See `experiment_dino.py` and `experiment_dino2.py` for the comparison
+scripts (kept as documentation of the methodology, not needed to run the
+production pipeline).
 
 ## Dataset
 
@@ -99,40 +125,49 @@ later found to be ~41% duplicate content and is known to be inflated -
 kept here for the record, not as something to quote.** The `after dedup
 fix` numbers are the honest ones.
 
-| Stage | Images/class | Accuracy |
-|---|---|---|
-| First pass, no augmentation | ~18-20 | ~62% |
-| Cleaned + augmented | 70-117 | ~79% (before dedup fix) |
-| Peepal/Banyan -> Tulsi/Amla swap | 70-159 | ~81% (before dedup fix) |
-| Expanded weakest classes (round 1) | 70-197 | ~86.7% (before dedup fix) |
-| Expanded weakest classes (round 2) | 121-218 | ~87.2% (before dedup fix) |
-| **After removing 553 duplicate files** | 59-126 | **~68.8%** |
-| After one more careful (dedup-safe) expansion round | 61-138 | **~71.0% (current, honest)** |
+| Stage | Images/class | Backbone + classifier | Accuracy |
+|---|---|---|---|
+| First pass, no augmentation | ~18-20 | MobileNetV3 + LogReg | ~62% |
+| Cleaned + augmented | 70-117 | MobileNetV3 + LogReg | ~79% (before dedup fix) |
+| Peepal/Banyan -> Tulsi/Amla swap | 70-159 | MobileNetV3 + LogReg | ~81% (before dedup fix) |
+| Expanded weakest classes (round 1) | 70-197 | MobileNetV3 + LogReg | ~86.7% (before dedup fix) |
+| Expanded weakest classes (round 2) | 121-218 | MobileNetV3 + LogReg | ~87.2% (before dedup fix) |
+| After removing 553 duplicate files | 59-126 | MobileNetV3 + LogReg | ~68.8% |
+| After one more careful (dedup-safe) expansion | 61-138 | MobileNetV3 + LogReg | ~71.0% |
+| **Switched backbone to DINO ViT-Small + MLP** | 61-138 (same data) | **DINO + MLP** | **~81.7-81.8% (current, honest)** |
 
-**The user's target was 90%+; this was not reached, and the honest number
-is meaningfully lower than what was reported mid-session.** The
-duplicate-content bug (see "Dataset" above) means the apparent
-"diminishing returns but still climbing toward 90%" trend described
-earlier in this file's history was itself partly an artifact of the bug,
-not a reliable trend. The corrected, clean trend is: 62% -> 68.8% (real
-data cleanup) -> 71.0% (one careful expansion round) - still a genuine
-improvement over the very first pass, but with much less margin than
-previously believed, and no strong evidence of an easy path to 90%+ via
-more internet photos alone.
+**The user's target was 90%+; this was not reached.** The single biggest
+move this session was switching from a supervised CNN (MobileNetV3) to a
+self-supervised one (DINO ViT-Small) on the *same, already-deduplicated*
+dataset - a real, direct +10.7-10.8 point jump (71.0% -> 81.7-81.8%,
+both cross-validated the same way, and the production run's 81.7%
+matched the standalone experiment's 81.8% closely, which is a good sign
+it's not a fluke of one random split). This is a materially different
+result from just adding more data, which had been showing diminishing
+returns under the old backbone.
 
-**To get closer to 90%+, in order of expected value:**
-1. Real campus photos of the team's actual specimens (consistent
-   lighting/framing beats generic internet photos; this is still the
-   biggest lever nobody has pulled, and now the most clearly necessary
-   one given how modest further internet-photo gains have been).
-2. A stronger embedding model (e.g. CLIP instead of MobileNetV3) - untried
-   this session, real engineering effort, no guaranteed payoff, and a
-   larger dependency footprint (see "Deployment note" below).
-3. More internet-photo volume - the Commons query pool for these 6 query
-   variants per species is largely exhausted (most fetch attempts in the
-   final round returned already-owned duplicates, and Wikimedia's API
-   started rate-limiting requests); new query terms or a different image
-   source would be needed to meaningfully grow this further.
+**To get closer to 90%+, in order of expected value (updated after the
+DINO switch):**
+1. Re-run the "expand the weakest classes" data-growth cycle *with DINO
+   embeddings* - the earlier "diminishing returns" conclusion was
+   measured entirely under the old, weaker backbone; it's not yet known
+   whether more data still helps as much now that the underlying
+   representation is stronger.
+2. Test-time augmentation (TTA) at inference - average predictions
+   across several augmented views of the same uploaded photo. Cheap,
+   stacks with anything else, not yet implemented.
+3. Partial fine-tuning of DINO's last transformer block (not the whole
+   backbone) - a middle ground between "fully frozen" (current) and
+   "fully fine-tuned" (ruled out as too likely to overfit on this much
+   data). Untested.
+4. A larger DINO variant (ViT-Base instead of ViT-Small) - self-supervised
+   representation quality tends to scale with model size, the same lever
+   that got MobileNetV3 -> DINO ViT-Small working. Bigger deployment
+   footprint (~330MB vs ~85MB), so this needs the Member 1 conversation
+   below to go further, not less, before committing to it.
+5. Real campus photos of the team's actual specimens - still true, still
+   likely the most reliable single fix, still not something produced this
+   session.
 
 Do not quote a higher number than what `train.py` prints for the current
 data in the presentation. If in doubt, rerun `python train.py` and read
@@ -195,16 +230,26 @@ estimate of "how similar do this species' own photos look to each
 other" - the guard is real and does something, but it is weaker on this
 corrected, smaller dataset than the (misleading) 9/10 result suggested.
 
-**Honest current state: 6/10 on this specific 10-photo test set.** This
-is a real, working defense against the failure mode this session started
-with (random noise scoring 87% confidence as "Neem" with no guard at
-all), but it is not a strong one, and the rate is expected to fluctuate
-noticeably as the dataset changes. Whoever retrains this model should
-re-run this same kind of test rather than trust a number from this file.
+**6/10 on this specific 10-photo test set, on the MobileNetV3 model.**
+
+**Re-tested again after switching the backbone to DINO ViT-Small (see
+"Approach" above) and recalibrating the per-class thresholds on DINO
+embeddings: 7/10 correctly rejected** (Hibiscus, Rosa, Helianthus,
+Bougainvillea, Epipremnum, Aloe, Musa now correctly rejected; Tagetes,
+Delonix, and Jasminum still slip through, misidentified as Ashoka/
+Bael/Neem respectively). A small improvement, consistent with DINO's
+features being more discriminative generally - but not dramatically
+better, and still not a strong guarantee.
+
+**This rate has changed three times now as the model changed (9/10 on
+duplicate-inflated data -> 6/10 after fixing that -> 7/10 after switching
+to DINO) - it is clearly sensitive to exactly which model and dataset are
+in use.** Whoever retrains this model should re-run this same kind of
+test rather than trust any single number, including this one.
 
 **For Member 5:** please retest this specifically as part of your QA pass
 (the "unsupported plant" test case in your prompt) with your own set of
-non-project-species photos, and treat 6/10 as the honest current baseline
+non-project-species photos, and treat 7/10 as the honest current baseline
 to compare against, not a target already met.
 
 ## Files
@@ -225,8 +270,8 @@ to compare against, not a target already met.
   visually-similar/confusable classes - see "Dataset" above for what it
   misses and why. `--apply` moves flagged images to `dataset_rejected/`
   instead of deleting them outright.
-- `train.py` — extracts embeddings (with augmentation), trains the
-  classifier, prints cross-validated accuracy, saves
+- `train.py` — extracts DINO ViT-Small embeddings (with augmentation),
+  trains the MLP classifier, prints cross-validated accuracy, saves
   `model/classifier.joblib`, `model/classes.json`,
   `model/class_reference_embeddings.npz`, and
   `model/class_similarity_thresholds.json` (the last two are the
@@ -237,6 +282,10 @@ to compare against, not a target already met.
 - `model/` — trained artifacts (regenerate by running `train.py`; not
   meaningfully useful without `dataset/`, but small enough to commit so the
   backend works without a retrain step).
+- `experiment_dino.py`, `experiment_dino2.py` — the side-by-side
+  backbone/classifier comparison scripts that led to switching to DINO
+  (see "Approach" above). Not part of the production pipeline; kept as
+  documentation of the methodology, not something you need to run.
 
 ## Retraining
 
@@ -273,3 +322,15 @@ Render/Railway build: if the build fails on size/time, the fallback mock
 above keeps the rest of the app working while we sort it out, but real
 identification would be down. Worth a build/deploy dry run earlier rather
 than the night before the demo.
+
+**New since switching to DINO:** the DINO ViT-Small weights (~85MB) are
+downloaded at runtime via `torch.hub.load(...)` the first time
+`plant_ai.py` imports successfully, from `github.com` and
+`dl.fbaipublicfiles.com` (pinned to a specific commit, not "main" - see
+the comment in `train.py`/`inference.py` - so it won't silently change,
+but the deploy host still needs outbound access to those two domains on
+first run, in addition to whatever `torchvision` already needed for
+MobileNet's weights). If the deploy environment blocks outbound requests
+to unfamiliar hosts, this will fail - the fallback mock still protects
+against a hard crash, but confirm this actually reaches those hosts in a
+deploy dry run rather than assuming it will.

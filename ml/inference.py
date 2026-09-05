@@ -1,8 +1,9 @@
 """
 Plant identification inference (Member 2 / Plant AI).
 
-Loads the trained MobileNetV3-Small feature extractor + Logistic Regression
-classifier (see train.py) and exposes a single function:
+Loads the trained DINO ViT-Small feature extractor + MLP classifier
+(see train.py for why DINO was chosen over a supervised CNN) and exposes
+a single function:
 
     identify_plant(image_bytes: bytes) -> dict with keys:
         plant_id: str | None
@@ -20,8 +21,12 @@ from typing import Optional, TypedDict
 import joblib
 import numpy as np
 import torch
-import torchvision
+import torchvision.transforms as T
 from PIL import Image, UnidentifiedImageError
+
+# Pinned to the same commit as train.py - see that file's build_feature_extractor
+# for why (reproducibility: don't silently pick up upstream changes).
+DINO_HUB_REF = "facebookresearch/dino:7c446df5b9f45747937fb0d72314eb9f7b66930a"
 
 HERE = pathlib.Path(__file__).parent
 MODEL_DIR = HERE / "model"
@@ -75,13 +80,16 @@ def _load() -> None:
         CLASS_SIMILARITY_THRESHOLDS_PATH.read_text(encoding="utf-8")
     )
 
-    weights = torchvision.models.MobileNet_V3_Small_Weights.DEFAULT
-    backbone = torchvision.models.mobilenet_v3_small(weights=weights)
-    backbone.classifier = torch.nn.Identity()
+    backbone = torch.hub.load(DINO_HUB_REF, "dino_vits16")
     backbone.eval()
 
     _backbone = backbone
-    _preprocess = weights.transforms()
+    _preprocess = T.Compose([
+        T.Resize(256),
+        T.CenterCrop(224),
+        T.ToTensor(),
+        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
 
 
 def _embed(image: Image.Image) -> np.ndarray:

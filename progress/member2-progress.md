@@ -10,14 +10,21 @@ HTTP with real files, not just unit-level calls). It replaces Member 4's
 mock `plant_ai.py` placeholder without changing `routes/identify.py` or
 any response fields.
 
-**Final honest numbers, corrected after finding a real bug mid-session:
-~71.0% cross-validated accuracy, and an out-of-distribution guard that
-correctly rejects 6/10 confirmed non-project-species test photos.** Both
-numbers are lower than what was reported partway through this session —
-see "The duplicate-content bug" below for exactly what happened and why.
-I'm leading with the correction rather than burying it, because the
-mid-session numbers (87.2% accuracy, 9/10 OOD rejection) were wrong and
-someone could otherwise reasonably act on them.
+**Final honest numbers: ~81.7-81.8% cross-validated accuracy (up from a
+corrected 71.0% after fixing a duplicate-data bug — see below), and an
+out-of-distribution guard that correctly rejects 7/10 confirmed
+non-project-species test photos (up from 6/10).** This session had two
+distinct corrections worth understanding in order:
+1. Mid-session, an inflated 87.2% accuracy / 9/10 OOD number was found to
+   be the result of a duplicate-data bug and corrected down to 71.0% / 6/10
+   — see "The duplicate-content bug" below.
+2. After that correction, the user asked what else could close the
+   remaining gap to 90%. Switching the model backbone from a supervised
+   CNN (MobileNetV3) to a self-supervised one (DINO ViT-Small) on the
+   *same, already-corrected* dataset produced a second, real jump:
+   71.0% -> 81.7-81.8% accuracy, 6/10 -> 7/10 OOD rejection. This is not
+   a reversal of the correction — it's a genuine improvement measured
+   honestly on top of the corrected baseline.
 
 ## The duplicate-content bug (read this first)
 Partway through this session, after several rounds of "expand the
@@ -47,14 +54,28 @@ of "how similar do this species' photos look to each other" than the
 duplicate-padded one did.
 
 ## Model Approach
-Transfer learning via frozen feature extraction: MobileNetV3-Small
-(ImageNet-pretrained, frozen) produces a 576-d embedding per image; a
-Logistic Regression classifier trained on the curated 8 plants sits on top,
-with 4x light augmentation per photo. Chosen over full fine-tuning because
-the dataset is small relative to a CNN's parameter count and would
-overfit. Tried ResNet18 as an alternative backbone early on — no
-meaningful accuracy gain — so kept the smaller/lighter MobileNetV3 for
-deployment. See `ml/README.md` for full detail.
+Transfer learning via frozen feature extraction: DINO ViT-Small
+(self-supervised, frozen) produces a 384-d embedding per image; an MLP
+classifier trained on the curated 8 plants sits on top, with 4x light
+augmentation per photo. Chosen over full fine-tuning because the dataset
+is small relative to the backbone's parameter count and would overfit.
+
+**Backbone history (two rounds of honest comparison, not one guess):**
+1. MobileNetV3-Small vs. ResNet18 (both supervised ImageNet CNNs) —
+   identical accuracy (62% vs 62%). Conclusion at the time: architecture
+   wasn't the bottleneck among supervised CNNs.
+2. Later, MobileNetV3-Small vs. DINO ViT-Small (self-supervised, a
+   fundamentally different training objective) — real jump, 71.0% ->
+   81.7-81.8%, cross-validated the same way both times. Also tried
+   concatenating DINO + MobileNetV3 features, which made things *worse*
+   (79-80.5%) — confirms the gain is from DINO's features being better,
+   not just "more features."
+
+Classifier head was also compared on DINO features: Logistic Regression
+(~79%), k-NN (75-78%, worse), MLP 256-hidden (81.8%, used in production).
+
+See `ml/README.md` for the full comparison and `experiment_dino.py`/
+`experiment_dino2.py` for the scripts that produced these numbers.
 
 ## Supported Plants — CHANGED THIS SESSION
 `backend/data/plants.json` was updated: **Peepal (Ficus religiosa) and
@@ -116,6 +137,14 @@ entries), but still need an independent fact-check pass.
   files aren't available.
 - Added `torch`, `torchvision` (CPU wheels via `--extra-index-url`),
   `scikit-learn`, `joblib` to `backend/requirements.txt`.
+- **Switched the production backbone from MobileNetV3-Small to DINO
+  ViT-Small** (self-supervised) after the user pushed for ideas to close
+  the remaining gap to 90% and CLIP/ensembling of similar CNNs were ruled
+  out (too large / low expected value given the ResNet18 test). Verified
+  via honest side-by-side comparison, not assumed — see "Model Approach."
+  Pinned to a specific commit of `facebookresearch/dino` (not `main`) for
+  reproducibility. Classifier switched to an MLP (from Logistic
+  Regression), also compared honestly on the same data.
 
 ## Files Changed
 - `backend/data/plants.json` (plant_03/plant_04 content replaced —
@@ -124,16 +153,19 @@ entries), but still need an independent fact-check pass.
   fixed)
 - `ml/dedupe_dataset.py` (new — one-off duplicate-removal cleanup)
 - `ml/filter_dataset.py` (new — automated outlier-flagging cleanup pass)
-- `ml/train.py` (new, extended with augmentation, grouped CV, and the v2
-  per-class out-of-distribution guard)
-- `ml/inference.py` (new, rewritten for the v2 guard)
-- `ml/README.md` (full write-up, including the duplicate-content bug and
-  corrected accuracy/OOD numbers)
+- `ml/train.py` (new, extended with augmentation, grouped CV, the v2
+  per-class out-of-distribution guard, and — final change — the DINO
+  ViT-Small backbone + MLP classifier)
+- `ml/inference.py` (new, rewritten for the v2 guard, then again for DINO)
+- `ml/experiment_dino.py`, `ml/experiment_dino2.py` (new — the backbone/
+  classifier comparison scripts, kept as documentation)
+- `ml/README.md` (full write-up, including the duplicate-content bug, the
+  DINO switch, and corrected accuracy/OOD numbers)
 - `ml/dataset/plant_01/` … `plant_08/` (61-138 images/class, 837 unique
   photos, after cleanup, expansion, and duplicate removal)
 - `ml/model/classifier.joblib`, `classes.json`,
   `class_reference_embeddings.npz`, `class_similarity_thresholds.json`
-  (final retrained artifacts, post-dedup-fix)
+  (final retrained artifacts, DINO-based)
 - `backend/services/plant_ai.py` (rewritten internals only — same
   `identify_plant(image_bytes)` signature/contract; `routes/identify.py`
   untouched)
@@ -143,31 +175,37 @@ entries), but still need an independent fact-check pass.
 ## API Status
 `POST /api/identify` unchanged externally. Verified locally with the
 backend actually running, via real HTTP requests, after the final
-(post-dedup-fix) retrain:
+(DINO-based) retrain:
 - Real images of all 8 current plants → correctly identified.
 - Empty upload / non-image bytes / random noise → handled per contract.
 - **10 real photos of confirmed non-project species** (hibiscus, rose,
   sunflower, marigold, bougainvillea, money plant, gulmohar, jasmine,
-  aloe, banana): **6/10 correctly rejected** on the final, honest model
-  (down from an initially-measured 9/10 that turned out to be inflated by
-  the duplicate-content bug — see above). Rosa, Helianthus (sunflower),
-  Tagetes (marigold), and Musa (banana) currently slip through.
+  aloe, banana): **7/10 correctly rejected** on the final DINO model (up
+  from 6/10 on the corrected MobileNetV3 model, and up from an
+  originally-measured-but-inflated 9/10 before the duplicate-content bug
+  was fixed). Tagetes (marigold), Delonix (gulmohar), and Jasminum
+  (jasmine) currently slip through.
 - Unknown/malformed requests still handled entirely by
   `routes/identify.py`/`plant_service.py`, untouched by this work.
 
 ## Accuracy / Testing
 **Honest numbers only — every figure below is from an actual run:**
 
-| Stage | Images/class | Accuracy |
-|---|---|---|
-| First pass, no augmentation | ~18-20 | ~62% |
-| Cleaned + augmented (later found ~41% duplicate) | 70-217 | 79-87.2% *(inflated, do not use)* |
-| **After removing 553 duplicate files** | 59-126 | **~68.8%** |
-| **After one more careful, dedup-safe expansion** | 61-138 | **~71.0% (final, honest)** |
+| Stage | Images/class | Backbone | Accuracy |
+|---|---|---|---|
+| First pass, no augmentation | ~18-20 | MobileNetV3 | ~62% |
+| Cleaned + augmented (later found ~41% duplicate) | 70-217 | MobileNetV3 | 79-87.2% *(inflated, do not use)* |
+| After removing 553 duplicate files | 59-126 | MobileNetV3 | ~68.8% |
+| After one more careful, dedup-safe expansion | 61-138 | MobileNetV3 | ~71.0% |
+| **Switched to DINO ViT-Small + MLP (same data)** | 61-138 | **DINO** | **~81.7-81.8% (final, honest)** |
 
-**The user's target was 90%+. The honest final result is ~71.0%,
-meaningfully short of that target and lower than what was reported
-mid-session before the duplicate bug was found.** I'm not softening this.
+**The user's target was 90%+. The honest final result is ~81.7-81.8%,
+still short of that target but a real ~10.7-10.8 point improvement over
+the corrected 71.0% baseline**, achieved by switching to a self-supervised
+backbone rather than adding more data (which had shown diminishing
+returns under the old backbone). The production run (81.7%) closely
+matched the standalone comparison experiment (81.8%), which is a good
+sign this isn't a fluke of one particular random CV split.
 
 Per-class F1 and the confusion matrix from the final model are
 reproducible via `python ml/train.py`'s output plus a confusion-matrix
@@ -178,10 +216,8 @@ I did not test on physical/live camera photos of real plants — that
 requires either real campus photos or Member 3's camera capture flow.
 Member 5: this dataset, these accuracy numbers, and the OOD guard need
 your independent QA pass per your test matrix. Please treat both the
-71.0% accuracy and the 6/10 OOD rejection rate as the honest current
-baseline, not a target already met — I'd expect your own testing to
-possibly find them optimistic in some direction too, the same way mine
-were.
+~81.7% accuracy and the 7/10 OOD rejection rate as the honest current
+baseline, not a target already met.
 
 ## Problems
 1. **Dataset is still Wikimedia reference images, not real campus
@@ -202,47 +238,66 @@ were.
    later fetch reused the freed index and silently overwrote a verified
    good image with a re-downloaded duplicate of already-known junk.
    Caught via `git diff --stat`, restored from git history, fixed.
-5. **Out-of-distribution guard is real but not strong** — 6/10 on the
-   current honest dataset. This is a working defense against total
-   failure (the original bug: random noise at 87% confidence), not a
-   robust open-set detector. A materially better version would need a
-   proper negative-example-trained classifier, which needs real project
-   time to build and validate.
-6. **Deployment size risk:** `torch`+`torchvision` are meaningfully larger
-   than the rest of the backend's dependencies. Flagged to Member 1.
+5. **Out-of-distribution guard is real but not strong** — 7/10 on the
+   current honest dataset (up from 6/10 after the DINO switch, but still
+   not robust). This is a working defense against total failure (the
+   original bug: random noise at 87% confidence), not a robust open-set
+   detector. A materially better version would need a proper
+   negative-example-trained classifier, which needs real project time to
+   build and validate.
+6. **Deployment size/complexity risk, now larger:** `torch`+`torchvision`
+   were already meaningfully bigger than the rest of the backend's
+   dependencies; DINO adds a ~85MB runtime download from `github.com` and
+   `dl.fbaipublicfiles.com` on first import (pinned to a specific commit
+   for reproducibility, but the deploy host still needs outbound access
+   to those hosts). Flagged to Member 1 — this needs an actual deploy
+   dry run, not an assumption that it'll work.
 
 ## Decisions
-- Frozen pretrained feature extraction + linear classifier, not
-  fine-tuning: matches dataset size, avoids overfitting.
-- MobileNetV3-Small over ResNet18: no accuracy difference measured, kept
-  the lighter model for deployment.
+- Frozen pretrained feature extraction, not fine-tuning: matches dataset
+  size, avoids overfitting.
+- MobileNetV3-Small over ResNet18 (first comparison): no accuracy
+  difference measured between two supervised CNNs.
+- DINO ViT-Small over MobileNetV3-Small (second comparison, after the
+  user pushed for more ideas toward 90%): real, measured accuracy jump.
+  Chose it over CLIP (ruled out as too large) and over ensembling two
+  similar supervised CNNs (ruled out by the ResNet18 result as low
+  expected value before even testing it).
+- MLP classifier over Logistic Regression (on DINO features): measured
+  improvement, small enough to not meaningfully change deployment cost.
 - Replaced Peepal/Banyan with Tulsi/Amla (team decision with the user).
 - Rebuilt the out-of-distribution guard as a per-predicted-class check
-  after v1 (pooled similarity) was found broken by testing.
+  after v1 (pooled similarity) was found broken by testing; recalibrated
+  again after both the dedup fix and the DINO switch, rather than
+  assuming a threshold computed for one embedding space still applies to
+  another.
 - When the duplicate-content bug was found, chose to fully deduplicate
   and re-measure rather than keep the higher (known-inflated) numbers —
-  reliability and honesty over a better-looking result, per the master
-  prompt's explicit instructions not to fabricate or inflate metrics.
+  reliability and honesty over a better-looking result.
 - `plant_ai.py` falls back to the original mock automatically if ML deps/
   model files are missing, rather than crashing the backend.
 
 ## Next Tasks
+- Re-run the "expand the weakest classes" data-growth cycle *with DINO
+  embeddings* — the earlier "diminishing returns" finding was measured
+  entirely under the old, weaker backbone; unknown whether more data
+  still helps as much now.
+- Implement test-time augmentation (TTA) at inference — average
+  predictions across several augmented views of one uploaded photo.
+  Cheap, not yet tried.
+- Consider partial fine-tuning of DINO's last transformer block, or a
+  larger DINO variant (ViT-Base) — both discussed with the user as
+  higher-effort options if more time is available.
 - Coordinate with Member 5 on real campus photos of the 8 (current)
-  species to retrain against — now clearly the primary lever, given how
-  little further internet-photo expansion is yielding (most fetch
-  attempts in the final round returned already-owned duplicates).
+  species to retrain against — still likely the most reliable single fix.
 - Coordinate with Member 5 on independently re-testing both the accuracy
-  claim and the out-of-distribution guard with their own data/photos —
-  given this session's own numbers needed correcting once already, an
-  independent check matters more than usual here.
-- Coordinate with Member 1 on a Render/Railway deploy dry run given the
-  torch/torchvision dependency size.
+  claim and the out-of-distribution guard with their own data/photos.
+- Coordinate with Member 1 on a Render/Railway deploy dry run — now more
+  important than before, since DINO adds a runtime download from
+  `github.com`/`dl.fbaipublicfiles.com` on top of the existing
+  torch/torchvision size.
 - Coordinate with whoever owns `backend/data/plants.json` on fact-
   checking the new Tulsi/Amla entries.
-- If more time is available: a stronger embedding model (CLIP) or a
-  properly-trained negative-example classifier for the OOD guard are the
-  two highest-value untried levers — both need real engineering time,
-  not a quick tweak.
 
 ## Handoff Notes
 - **How to start the service:** part of normal backend startup —
@@ -255,12 +310,15 @@ were.
 - **What model/dependency is required:** `torch`, `torchvision`,
   `scikit-learn`, `joblib` (in `backend/requirements.txt`). Falls back to
   the deterministic mock automatically if these aren't installed or
-  `ml/model/*` is missing.
+  `ml/model/*` is missing. **New:** the DINO backbone also needs outbound
+  network access to `github.com` and `dl.fbaipublicfiles.com` on first
+  import (downloads and caches ~85MB) — not just PyPI/torch's own index.
 - **What changed that affects other members:** `backend/data/plants.json`
   plant_03/plant_04 content changed (Peepal/Banyan → Tulsi/Amla).
-- **What remains imperfect, stated plainly:** ~71.0% cross-validated
-  accuracy (up from 62% at the very start of this session, but short of
-  the 90%+ target, and lower than the ~87% figure reported partway
-  through before a real bug was found and fixed). Out-of-distribution
-  guard correctly rejects 6/10 confirmed non-project species. Real campus
-  photos are the clearest remaining lever for both numbers.
+- **What remains imperfect, stated plainly:** ~81.7-81.8% cross-validated
+  accuracy (up from 62% at the start of this session, and up from a
+  corrected 71.0% after switching from MobileNetV3 to DINO ViT-Small —
+  still short of the 90%+ target). Out-of-distribution guard correctly
+  rejects 7/10 confirmed non-project species. Real campus photos remain
+  the most likely way to close the rest of the gap; TTA and further
+  DINO-based data expansion are the next untried, lower-effort levers.

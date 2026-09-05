@@ -2,11 +2,25 @@
 Train the plant identification classifier (Member 2 / Plant AI).
 
 Approach: transfer learning via frozen feature extraction, not full
-fine-tuning. A pretrained MobileNetV3-Small (ImageNet) backbone produces a
-576-d embedding per image; a Logistic Regression classifier is trained on
-top of those embeddings. This is deliberately simple and robust for a
-small curated dataset - fine-tuning a full CNN on this little data would
-overfit badly.
+fine-tuning. A pretrained DINO ViT-Small (self-supervised, not
+ImageNet-labeled) backbone produces a 384-d embedding per image; a small
+MLP classifier is trained on top of those embeddings. Fine-tuning the
+backbone itself was ruled out: the curated dataset is small enough that
+fine-tuning millions of parameters would overfit badly.
+
+DINO over a supervised CNN (MobileNetV3-Small, tried first; also compared
+against ResNet18) was chosen after direct, honest side-by-side testing:
+swapping between two *supervised* ImageNet backbones (MobileNetV3 vs
+ResNet18) made no measurable difference (62% vs 62% at the time) - both
+learn similar, correlated features from the same labeled-classification
+objective. DINO's self-supervised training objective produces
+qualitatively different, more transferable features for this kind of
+small fine-grained dataset, and it measured a real, honest accuracy jump
+(71.0% -> 81.8%, both cross-validated the same way) on the same data.
+Concatenating DINO with MobileNetV3 features was also tried and made
+things *worse* (79-80.5%) - the weaker supervised features diluted the
+stronger self-supervised ones rather than adding complementary signal.
+See ml/README.md for the full comparison.
 
 Each source photo is also embedded under several light augmentations
 (crop/flip/color-jitter/rotation) to multiply the effective training set
@@ -18,7 +32,7 @@ Usage:
     python train.py
 
 Reads:  ml/dataset/<plant_id>/*.jpg
-Writes: ml/model/classifier.joblib   (sklearn LogisticRegression)
+Writes: ml/model/classifier.joblib   (sklearn MLPClassifier)
         ml/model/classes.json        (index -> plant_id mapping)
 """
 
@@ -28,11 +42,10 @@ import pathlib
 import joblib
 import numpy as np
 import torch
-import torchvision
 import torchvision.transforms as T
 from PIL import Image
-from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import StratifiedGroupKFold, cross_val_score
+from sklearn.neural_network import MLPClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.pipeline import make_pipeline
 
@@ -56,11 +69,20 @@ AUGMENT = T.Compose([
 
 
 def build_feature_extractor():
-    weights = torchvision.models.MobileNet_V3_Small_Weights.DEFAULT
-    model = torchvision.models.mobilenet_v3_small(weights=weights)
-    model.classifier = torch.nn.Identity()  # expose the 576-d pooled features
+    # Pinned to a specific commit, not "main", so this doesn't silently
+    # change behavior if the upstream repo is ever updated - reproducibility
+    # matters more here than always getting the latest revision.
+    model = torch.hub.load(
+        "facebookresearch/dino:7c446df5b9f45747937fb0d72314eb9f7b66930a",
+        "dino_vits16",
+    )
     model.eval()
-    preprocess = weights.transforms()
+    preprocess = T.Compose([
+        T.Resize(256),
+        T.CenterCrop(224),
+        T.ToTensor(),
+        T.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ])
     return model, preprocess
 
 
@@ -122,13 +144,13 @@ def main() -> None:
     print(f"\nTotal samples: {len(y)} ({group_id} source photos), "
           f"feature dim: {X.shape[1]}, classes: {len(classes)}")
 
-    # Heavier regularization (small C) suits this dataset: even with
-    # augmentation, ~20-100 source photos per class on a 576-d embedding
-    # overfits easily at the sklearn default C=1.0.
-    # C=0.3 was chosen via cross-validation (see ml/README.md).
+    # MLP over Logistic Regression: compared honestly via cross-validation
+    # on DINO embeddings (Logistic Regression ~79%, MLP ~81.8% - see
+    # ml/README.md). hidden_layer_sizes/alpha chosen via a small sweep;
+    # bigger networks and other alphas didn't measurably improve on this.
     clf = make_pipeline(
         StandardScaler(),
-        LogisticRegression(max_iter=2000, C=0.3),
+        MLPClassifier(hidden_layer_sizes=(256,), alpha=0.01, max_iter=800, random_state=42),
     )
 
     # StratifiedGroupKFold: keeps class balance across folds (Stratified)

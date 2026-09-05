@@ -6,6 +6,11 @@ anthropic==0.34.2
 
 # Plant identification (Member 2 / ml/). CPU-only wheels via --extra-index-url
 # to avoid pulling CUDA builds (much larger, unneeded for inference-only use).
+# NOTE: the model backbone (DINO ViT-Small, loaded via torch.hub in
+# ml/inference.py) also downloads ~85MB from github.com and
+# dl.fbaipublicfiles.com on first import - the deploy host needs outbound
+# access to those hosts too, not just this package index. See ml/README.md
+# "Deployment note for Member 1".
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch==2.14.0
 torchvision==0.29.0
