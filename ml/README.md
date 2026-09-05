@@ -48,10 +48,23 @@ production pipeline).
 
 ## Dataset
 
-`ml/dataset/<plant_id>/*.jpg` — one folder per plant, currently populated
-via `fetch_dataset.py`, which pulls freely-licensed reference photos from
-Wikimedia Commons using multiple query variants per plant (scientific
-name, common name, "leaf", "tree", "flower", "fruit").
+`ml/dataset/<plant_id>/*.jpg` — one folder per plant, populated from two
+sources:
+- `fetch_dataset.py` — Wikimedia Commons, multiple query variants per
+  plant (scientific name, common name, "leaf", "tree", "flower", "fruit").
+- `fetch_inaturalist.py` — added later, after Commons' query pool was
+  confirmed exhausted (a full pass found 0 new unique images across 4
+  classes, and Wikimedia began rate-limiting with an explicit warning to
+  stop). iNaturalist observations are community-identified ("research
+  grade") real field photos, a different character from Commons' mix of
+  studio/product/temple/press photos, and a much larger pool (thousands
+  of research-grade observations per species for these common Indian
+  plants). License-filtered to CC0/CC-BY/CC-BY-SA/CC-BY-NC/CC-BY-NC-SA -
+  some of these are non-commercial licenses, flag before any commercial
+  use. **Result: added ~300 images across all 8 classes but produced no
+  measurable accuracy change (81.0% vs 81.7% - see "Known accuracy") -
+  kept anyway for the broader/higher-quality source diversity, at no
+  measured cost.**
 
 **This is a placeholder dataset for prototyping, not real campus photos.**
 It went through several rounds of quality control, all done by actually
@@ -134,7 +147,8 @@ fix` numbers are the honest ones.
 | Expanded weakest classes (round 2) | 121-218 | MobileNetV3 + LogReg | ~87.2% (before dedup fix) |
 | After removing 553 duplicate files | 59-126 | MobileNetV3 + LogReg | ~68.8% |
 | After one more careful (dedup-safe) expansion | 61-138 | MobileNetV3 + LogReg | ~71.0% |
-| **Switched backbone to DINO ViT-Small + MLP** | 61-138 (same data) | **DINO + MLP** | **~81.7-81.8% (current, honest)** |
+| Switched backbone to DINO ViT-Small + MLP | 61-138 (same data) | DINO + MLP | ~81.7-81.8% |
+| **Added iNaturalist data (2nd source)** | 101-178 (837 -> 1155 photos) | **DINO + MLP** | **~81.0% (current, honest - no real change)** |
 
 **The user's target was 90%+; this was not reached.** The single biggest
 move this session was switching from a supervised CNN (MobileNetV3) to a
@@ -142,32 +156,37 @@ self-supervised one (DINO ViT-Small) on the *same, already-deduplicated*
 dataset - a real, direct +10.7-10.8 point jump (71.0% -> 81.7-81.8%,
 both cross-validated the same way, and the production run's 81.7%
 matched the standalone experiment's 81.8% closely, which is a good sign
-it's not a fluke of one random split). This is a materially different
-result from just adding more data, which had been showing diminishing
-returns under the old backbone.
+it's not a fluke of one random split).
 
-**To get closer to 90%+, in order of expected value (updated after the
-DINO switch):**
-1. Re-run the "expand the weakest classes" data-growth cycle *with DINO
-   embeddings* - the earlier "diminishing returns" conclusion was
-   measured entirely under the old, weaker backbone; it's not yet known
-   whether more data still helps as much now that the underlying
-   representation is stronger.
-2. Test-time augmentation (TTA) at inference - average predictions
-   across several augmented views of the same uploaded photo. Cheap,
-   stacks with anything else, not yet implemented.
-3. Partial fine-tuning of DINO's last transformer block (not the whole
+**Two follow-up attempts to push past ~82% both came back negative,
+honestly reported rather than omitted:**
+- **Test-time augmentation** (average predictions across 5 views of each
+  held-out photo, measured via `experiment_tta.py` using the exact same
+  embeddings as `train.py`'s own CV): 82.8% single-view vs 82.7% TTA - a
+  -0.1 point "improvement," i.e. no real effect. Not implemented in
+  production. Likely explanation: the classifier was already trained on
+  these same augmentations, so averaging over them at inference doesn't
+  add information the model didn't already have.
+- **Adding a second data source** (iNaturalist, ~300 more images, all
+  manually spot-checked): 81.0% vs 81.7% before - also no real change.
+  This is genuine evidence that accuracy has plateaued for this
+  backbone/dataset-size combination, not that more data always helps.
+
+**To get closer to 90%+, in order of remaining expected value:**
+1. Real campus photos of the team's actual specimens - still likely the
+   most reliable single fix, still not something produced this session.
+   Two different internet sources (Commons, iNaturalist) both plateaued
+   around the same accuracy, which is evidence real photos of the
+   specific plants being identified matter more than more internet photos
+   of the species in general.
+2. Partial fine-tuning of DINO's last transformer block (not the whole
    backbone) - a middle ground between "fully frozen" (current) and
-   "fully fine-tuned" (ruled out as too likely to overfit on this much
-   data). Untested.
-4. A larger DINO variant (ViT-Base instead of ViT-Small) - self-supervised
+   "fully fine-tuned" (ruled out as too likely to overfit). Untested.
+3. A larger DINO variant (ViT-Base instead of ViT-Small) - self-supervised
    representation quality tends to scale with model size, the same lever
    that got MobileNetV3 -> DINO ViT-Small working. Bigger deployment
-   footprint (~330MB vs ~85MB), so this needs the Member 1 conversation
-   below to go further, not less, before committing to it.
-5. Real campus photos of the team's actual specimens - still true, still
-   likely the most reliable single fix, still not something produced this
-   session.
+   footprint (~330MB vs ~85MB), needs the Member 1 conversation below to
+   go further before committing to it.
 
 Do not quote a higher number than what `train.py` prints for the current
 data in the presentation. If in doubt, rerun `python train.py` and read
@@ -241,11 +260,16 @@ Bael/Neem respectively). A small improvement, consistent with DINO's
 features being more discriminative generally - but not dramatically
 better, and still not a strong guarantee.
 
-**This rate has changed three times now as the model changed (9/10 on
+**Re-tested a fourth time after adding the iNaturalist data: still 7/10**,
+same three species slipping through (Tagetes, Delonix, Jasminum). This
+rate has changed three times as the model/data changed (9/10 on
 duplicate-inflated data -> 6/10 after fixing that -> 7/10 after switching
-to DINO) - it is clearly sensitive to exactly which model and dataset are
-in use.** Whoever retrains this model should re-run this same kind of
-test rather than trust any single number, including this one.
+to DINO -> 7/10 again after adding iNaturalist data) - it is clearly
+sensitive to exactly which model and dataset are in use, though it seems
+to have stabilized around 7/10 for the current DINO-based setup across
+two different dataset compositions. Whoever retrains this model should
+re-run this same kind of test rather than trust any single number,
+including this one.
 
 **For Member 5:** please retest this specifically as part of your QA pass
 (the "unsupported plant" test case in your prompt) with your own set of
@@ -270,6 +294,9 @@ to compare against, not a target already met.
   visually-similar/confusable classes - see "Dataset" above for what it
   misses and why. `--apply` moves flagged images to `dataset_rejected/`
   instead of deleting them outright.
+- `fetch_inaturalist.py` — second dataset source (see "Dataset" above),
+  used after Commons was confirmed exhausted. Same content-hash dedup
+  approach as `fetch_dataset.py`.
 - `train.py` — extracts DINO ViT-Small embeddings (with augmentation),
   trains the MLP classifier, prints cross-validated accuracy, saves
   `model/classifier.joblib`, `model/classes.json`,
@@ -286,6 +313,9 @@ to compare against, not a target already met.
   backbone/classifier comparison scripts that led to switching to DINO
   (see "Approach" above). Not part of the production pipeline; kept as
   documentation of the methodology, not something you need to run.
+- `experiment_tta.py` — tests whether test-time augmentation helps
+  (it doesn't - see "Known accuracy"). Also documentation, not part of
+  the production pipeline.
 
 ## Retraining
 

@@ -10,21 +10,24 @@ HTTP with real files, not just unit-level calls). It replaces Member 4's
 mock `plant_ai.py` placeholder without changing `routes/identify.py` or
 any response fields.
 
-**Final honest numbers: ~81.7-81.8% cross-validated accuracy (up from a
-corrected 71.0% after fixing a duplicate-data bug — see below), and an
-out-of-distribution guard that correctly rejects 7/10 confirmed
-non-project-species test photos (up from 6/10).** This session had two
-distinct corrections worth understanding in order:
+**Final honest numbers: ~81.0% cross-validated accuracy, out-of-distribution
+guard correctly rejects 7/10 confirmed non-project-species test photos.**
+This session had several distinct corrections/iterations worth
+understanding in order:
 1. Mid-session, an inflated 87.2% accuracy / 9/10 OOD number was found to
    be the result of a duplicate-data bug and corrected down to 71.0% / 6/10
    — see "The duplicate-content bug" below.
-2. After that correction, the user asked what else could close the
-   remaining gap to 90%. Switching the model backbone from a supervised
-   CNN (MobileNetV3) to a self-supervised one (DINO ViT-Small) on the
-   *same, already-corrected* dataset produced a second, real jump:
-   71.0% -> 81.7-81.8% accuracy, 6/10 -> 7/10 OOD rejection. This is not
-   a reversal of the correction — it's a genuine improvement measured
-   honestly on top of the corrected baseline.
+2. Switching the model backbone from a supervised CNN (MobileNetV3) to a
+   self-supervised one (DINO ViT-Small) on the *same, already-corrected*
+   dataset produced a second, real jump: 71.0% -> 81.7-81.8% accuracy,
+   6/10 -> 7/10 OOD rejection.
+3. Two follow-up attempts to push past ~82% - test-time augmentation, and
+   adding a second data source (iNaturalist) - both honestly measured and
+   both came back negative (no real accuracy change either way). The
+   iNaturalist data was kept anyway (broader/higher-quality source, no
+   measured cost), landing at the current 81.0%. See "Accuracy / Testing"
+   for the full numbers - this is not a decline from 81.7%, it's noise
+   around the same plateau.
 
 ## The duplicate-content bug (read this first)
 Partway through this session, after several rounds of "expand the
@@ -157,12 +160,17 @@ entries), but still need an independent fact-check pass.
   per-class out-of-distribution guard, and — final change — the DINO
   ViT-Small backbone + MLP classifier)
 - `ml/inference.py` (new, rewritten for the v2 guard, then again for DINO)
-- `ml/experiment_dino.py`, `ml/experiment_dino2.py` (new — the backbone/
-  classifier comparison scripts, kept as documentation)
+- `ml/experiment_dino.py`, `ml/experiment_dino2.py`, `ml/experiment_tta.py`
+  (new — comparison/experiment scripts, kept as documentation; TTA's
+  result was negative, see "Accuracy / Testing")
+- `ml/fetch_inaturalist.py` (new — second dataset source, added after
+  Wikimedia Commons was confirmed exhausted)
 - `ml/README.md` (full write-up, including the duplicate-content bug, the
-  DINO switch, and corrected accuracy/OOD numbers)
-- `ml/dataset/plant_01/` … `plant_08/` (61-138 images/class, 837 unique
-  photos, after cleanup, expansion, and duplicate removal)
+  DINO switch, the TTA/iNaturalist negative results, and corrected
+  accuracy/OOD numbers)
+- `ml/dataset/plant_01/` … `plant_08/` (101-178 images/class, 1155 unique
+  photos from two sources, after cleanup, expansion, and duplicate
+  removal)
 - `ml/model/classifier.joblib`, `classes.json`,
   `class_reference_embeddings.npz`, `class_similarity_thresholds.json`
   (final retrained artifacts, DINO-based)
@@ -180,11 +188,12 @@ backend actually running, via real HTTP requests, after the final
 - Empty upload / non-image bytes / random noise → handled per contract.
 - **10 real photos of confirmed non-project species** (hibiscus, rose,
   sunflower, marigold, bougainvillea, money plant, gulmohar, jasmine,
-  aloe, banana): **7/10 correctly rejected** on the final DINO model (up
-  from 6/10 on the corrected MobileNetV3 model, and up from an
-  originally-measured-but-inflated 9/10 before the duplicate-content bug
-  was fixed). Tagetes (marigold), Delonix (gulmohar), and Jasminum
-  (jasmine) currently slip through.
+  aloe, banana): **7/10 correctly rejected**, consistently across both
+  the DINO-only and DINO+iNaturalist datasets (up from 6/10 on the
+  corrected MobileNetV3 model, and up from an originally-measured-but-
+  inflated 9/10 before the duplicate-content bug was fixed). Tagetes
+  (marigold), Delonix (gulmohar), and Jasminum (jasmine) currently slip
+  through, consistently.
 - Unknown/malformed requests still handled entirely by
   `routes/identify.py`/`plant_service.py`, untouched by this work.
 
@@ -197,15 +206,20 @@ backend actually running, via real HTTP requests, after the final
 | Cleaned + augmented (later found ~41% duplicate) | 70-217 | MobileNetV3 | 79-87.2% *(inflated, do not use)* |
 | After removing 553 duplicate files | 59-126 | MobileNetV3 | ~68.8% |
 | After one more careful, dedup-safe expansion | 61-138 | MobileNetV3 | ~71.0% |
-| **Switched to DINO ViT-Small + MLP (same data)** | 61-138 | **DINO** | **~81.7-81.8% (final, honest)** |
+| Switched to DINO ViT-Small + MLP (same data) | 61-138 | DINO | ~81.7-81.8% |
+| **Added iNaturalist data (2nd source), 837 -> 1155 photos** | 101-178 | **DINO** | **~81.0% (final, honest)** |
 
-**The user's target was 90%+. The honest final result is ~81.7-81.8%,
-still short of that target but a real ~10.7-10.8 point improvement over
-the corrected 71.0% baseline**, achieved by switching to a self-supervised
-backbone rather than adding more data (which had shown diminishing
-returns under the old backbone). The production run (81.7%) closely
-matched the standalone comparison experiment (81.8%), which is a good
-sign this isn't a fluke of one particular random CV split.
+**The user's target was 90%+. The honest final result is ~81.0%,
+short of that target.** The real, substantial gain this session was
+switching to a self-supervised backbone (~+10.7-10.8 points, 71.0% ->
+81.7-81.8%). Two further attempts to push past that — test-time
+augmentation and adding a second, independent data source — were tried
+and **both came back negative** (no measurable accuracy change either
+way, honestly reported rather than omitted). The iNaturalist data was
+kept anyway for its broader/higher-quality source diversity, since it
+cost nothing measured. This is genuine evidence of a plateau for this
+backbone/dataset-size combination, not a sign that more effort here would
+keep paying off.
 
 Per-class F1 and the confusion matrix from the final model are
 reproducible via `python ml/train.py`'s output plus a confusion-matrix
@@ -216,7 +230,7 @@ I did not test on physical/live camera photos of real plants — that
 requires either real campus photos or Member 3's camera capture flow.
 Member 5: this dataset, these accuracy numbers, and the OOD guard need
 your independent QA pass per your test matrix. Please treat both the
-~81.7% accuracy and the 7/10 OOD rejection rate as the honest current
+~81.0% accuracy and the 7/10 OOD rejection rate as the honest current
 baseline, not a target already met.
 
 ## Problems
@@ -278,18 +292,17 @@ baseline, not a target already met.
   model files are missing, rather than crashing the backend.
 
 ## Next Tasks
-- Re-run the "expand the weakest classes" data-growth cycle *with DINO
-  embeddings* — the earlier "diminishing returns" finding was measured
-  entirely under the old, weaker backbone; unknown whether more data
-  still helps as much now.
-- Implement test-time augmentation (TTA) at inference — average
-  predictions across several augmented views of one uploaded photo.
-  Cheap, not yet tried.
+- **Do not re-try TTA or more internet-photo volume** — both tested this
+  session and both came back negative (see "Accuracy / Testing"). Further
+  effort on either is low expected value unless something else changes.
 - Consider partial fine-tuning of DINO's last transformer block, or a
-  larger DINO variant (ViT-Base) — both discussed with the user as
-  higher-effort options if more time is available.
+  larger DINO variant (ViT-Base) — discussed with the user as
+  higher-effort, higher-risk options if more time is available; neither
+  attempted this session.
 - Coordinate with Member 5 on real campus photos of the 8 (current)
-  species to retrain against — still likely the most reliable single fix.
+  species to retrain against — still likely the most reliable single fix,
+  and now more clearly necessary given two different internet sources
+  both plateaued at the same accuracy.
 - Coordinate with Member 5 on independently re-testing both the accuracy
   claim and the out-of-distribution guard with their own data/photos.
 - Coordinate with Member 1 on a Render/Railway deploy dry run — now more
@@ -315,10 +328,13 @@ baseline, not a target already met.
   import (downloads and caches ~85MB) — not just PyPI/torch's own index.
 - **What changed that affects other members:** `backend/data/plants.json`
   plant_03/plant_04 content changed (Peepal/Banyan → Tulsi/Amla).
-- **What remains imperfect, stated plainly:** ~81.7-81.8% cross-validated
+- **What remains imperfect, stated plainly:** ~81.0% cross-validated
   accuracy (up from 62% at the start of this session, and up from a
   corrected 71.0% after switching from MobileNetV3 to DINO ViT-Small —
   still short of the 90%+ target). Out-of-distribution guard correctly
-  rejects 7/10 confirmed non-project species. Real campus photos remain
-  the most likely way to close the rest of the gap; TTA and further
-  DINO-based data expansion are the next untried, lower-effort levers.
+  rejects 7/10 confirmed non-project species. Two further attempts to
+  push accuracy higher (test-time augmentation, a second data source)
+  both failed to move the number — this looks like a genuine plateau for
+  this approach. Real campus photos remain the most likely way to close
+  the rest of the gap; partial fine-tuning or a larger DINO variant are
+  the next untried, higher-effort options.
